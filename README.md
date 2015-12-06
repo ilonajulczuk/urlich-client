@@ -8,8 +8,8 @@ What I would need:
 - json parsing (json-c)
 - testing
 - configuration from file or env variable
-- list of recently uploaded files?
-- search of all updated files
+- list of recently created shortened links?
+- search of all updated links
 
 # Dependencies
 
