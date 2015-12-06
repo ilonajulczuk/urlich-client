@@ -1,4 +1,3 @@
-/* standard includes */
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdarg.h>
@@ -6,183 +5,154 @@
 
 /* json-c (https://github.com/json-c/json-c) */
 #include <curl/curl.h>
-#include <json-c/json.h>
 
 /* libcurl (http://curl.haxx.se/libcurl/c) */
+#include <json-c/json.h>
 
-/* holder for curl fetch */
-struct curl_fetch_st {
+// CURLRawData is a holder for curl fetch.
+class CURLRawData {
+public:
     char *payload;
     size_t size;
 };
 
-/* callback for curl fetch */
-size_t curl_callback (void *contents, size_t size, size_t nmemb, void *userp) {
-    size_t realsize = size * nmemb;                             /* calculate buffer size */
-    struct curl_fetch_st *p = (struct curl_fetch_st *) userp;   /* cast pointer to fetch struct */
+// curl_callback is a callback for curl fetch.
+size_t curl_callback(void *contents, size_t size, size_t nmemb,
+        void *userp) {
+    size_t realsize = size * nmemb;
 
-    /* expand buffer */
+    CURLRawData *p = (struct CURLRawData *) userp;
+
+    // Expand buffer.
     p->payload = (char *) realloc(p->payload, p->size + realsize + 1);
-
-    /* check buffer */
+    // Check if buffer was expanded correctly.
     if (p->payload == NULL) {
-      /* this isn't good */
-      fprintf(stderr, "ERROR: Failed to expand buffer in curl_callback");
-      /* free buffer */
-      free(p->payload);
-      /* return */
-      return -1;
+        fprintf(stderr, "ERROR: Failed to expand buffer in curl_callback");
+        // Do I have to free buffer if I'm exiting?
+        // Or is it some different thread exiting?
+        // TODO(att): check how it works.
+        free(p->payload);
+        return -1;
     }
 
-    /* copy contents to buffer */
     memcpy(&(p->payload[p->size]), contents, realsize);
-
-    /* set new buffer size */
     p->size += realsize;
-
-    /* ensure null termination */
     p->payload[p->size] = 0;
-
-    /* return size */
+    // TODO(att): Refactor realsize name to something else?
     return realsize;
 }
 
-/* fetch and return url body via curl */
-CURLcode curl_fetch_url(CURL *ch, const char *url, struct curl_fetch_st *fetch) {
-    CURLcode rcode;                   /* curl result code */
 
-    /* init payload */
+CURLcode curl_fetch_url(CURL *ch, const char *url,
+        CURLRawData *fetch) {
+    CURLcode rcode;
+    // I wonder how much it actually is? Size of initialized char string.
+    // TODO(att): check it!
     fetch->payload = (char *) calloc(1, sizeof(fetch->payload));
-
-    /* check payload */
     if (fetch->payload == NULL) {
-        /* log error */
         fprintf(stderr, "ERROR: Failed to allocate payload in curl_fetch_url");
-        /* return error */
         return CURLE_FAILED_INIT;
     }
-
-    /* init size */
     fetch->size = 0;
-
-    /* set url to fetch */
     curl_easy_setopt(ch, CURLOPT_URL, url);
-
-    /* set calback function */
     curl_easy_setopt(ch, CURLOPT_WRITEFUNCTION, curl_callback);
-
-    /* pass fetch struct pointer */
     curl_easy_setopt(ch, CURLOPT_WRITEDATA, (void *) fetch);
-
-    /* set default user agent */
     curl_easy_setopt(ch, CURLOPT_USERAGENT, "libcurl-agent/1.0");
-
-    /* set timeout */
-    curl_easy_setopt(ch, CURLOPT_TIMEOUT, 5);
-
-    /* enable location redirects */
     curl_easy_setopt(ch, CURLOPT_FOLLOWLOCATION, 1);
-
-    /* set maximum allowed redirects */
     curl_easy_setopt(ch, CURLOPT_MAXREDIRS, 1);
 
-    /* fetch the url */
     rcode = curl_easy_perform(ch);
-
-    /* return */
     return rcode;
 }
 
-int main(int argc, char *argv[]) {
-    CURL *ch;                                               /* curl handle */
-    CURLcode rcode;                                         /* curl result code */
+const char* getURL(int argc, char *argv[]) {
+    const char *url = "http://127.0.0.1:9081/add";
+    return url;
+}
 
-    json_object *json;                                      /* json post body */
-    enum json_tokener_error jerr = json_tokener_success;    /* json parse error */
+class JSONResponse {
+    public:
+        json_object* getJSON(){
+            return obj;
+        }
+        const char *getStatusCode() {
+            return status_code;
+        }
+        JSONResponse (const char *status_code, json_object *obj) : status_code(status_code), obj(obj) {}
+    private:
+        const char *status_code;
+        json_object *obj;
+};
 
-    struct curl_fetch_st curl_fetch;                        /* curl fetch struct */
-    struct curl_fetch_st *cf = &curl_fetch;                 /* pointer to fetch struct */
-    struct curl_slist *headers = NULL;                      /* http headers to send with request */
-
-    /* url to test site */
-    const char *url = "http://jsonplaceholder.typicode.com/posts/";
-
-    /* init curl handle */
-    if ((ch = curl_easy_init()) == NULL) {
-        /* log error */
-        fprintf(stderr, "ERROR: Failed to create curl handle in fetch_session");
-        /* return error */
-        return 1;
+class Client {
+public:
+    Client() {
+        ch = curl_easy_init();
+        if (ch == NULL) {
+            fprintf(stderr, "ERROR: Failed to create curl handle.");
+        }
     }
 
-    /* set content type */
-    headers = curl_slist_append(headers, "Accept: application/json");
-    headers = curl_slist_append(headers, "Content-Type: application/json");
+    JSONResponse* Post(const char *url, json_object *data) {
+        CURLcode rcode;
+        CURLRawData curl_fetch;
+        CURLRawData *cf = &curl_fetch;
+        curl_slist *headers = NULL; // headers to send with request
 
-    /* create json object for post */
-    json = json_object_new_object();
+        if ((ch = curl_easy_init()) == NULL) {
+            fprintf(stderr, "ERROR: Failed to create curl handle.");
+            return NULL;
+        }
 
-    /* build post data */
-    json_object_object_add(json, "title", json_object_new_string("testies"));
-    json_object_object_add(json, "body", json_object_new_string("testies ... testies ... 1,2,3"));
-    json_object_object_add(json, "userId", json_object_new_int(133));
+        curl_easy_setopt(ch, CURLOPT_CUSTOMREQUEST, "POST");
+        curl_easy_setopt(ch, CURLOPT_HTTPHEADER, headers);
+        curl_easy_setopt(ch, CURLOPT_POSTFIELDS, json_object_to_json_string(data));
 
-    /* set curl options */
-    curl_easy_setopt(ch, CURLOPT_CUSTOMREQUEST, "POST");
-    curl_easy_setopt(ch, CURLOPT_HTTPHEADER, headers);
-    curl_easy_setopt(ch, CURLOPT_POSTFIELDS, json_object_to_json_string(json));
+        rcode = curl_fetch_url(ch, url, cf);
+        const char *statusCode = curl_easy_strerror(rcode);
+        curl_easy_cleanup(ch);
+        curl_slist_free_all(headers);
+        // Free json object.
+        json_object_put(data);
 
-    /* fetch page and capture return code */
-    rcode = curl_fetch_url(ch, url, cf);
+        if (rcode != CURLE_OK || cf->size < 1) {
+            fprintf(stderr, "ERROR: Failed to fetch url (%s) - curl said: %s", url, statusCode);
+            return NULL;
+        }
 
-    /* cleanup curl handle */
-    curl_easy_cleanup(ch);
+        if (cf->payload == NULL) {
+            fprintf(stderr, "ERROR: Failed to populate payload");
+            free(cf->payload);
+            return NULL;
+        }
 
-    /* free headers */
-    curl_slist_free_all(headers);
-
-    /* free json object */
-    json_object_put(json);
-
-    /* check return code */
-    if (rcode != CURLE_OK || cf->size < 1) {
-        /* log error */
-        fprintf(stderr, "ERROR: Failed to fetch url (%s) - curl said: %s",
-            url, curl_easy_strerror(rcode));
-        /* return error */
-        return 2;
-    }
-
-    /* check payload */
-    if (cf->payload != NULL) {
-        /* print result */
-        printf("CURL Returned: \n%s\n", cf->payload);
-        /* parse return */
+        json_object *json;
+        json_tokener_error jerr = json_tokener_success;
         json = json_tokener_parse_verbose(cf->payload, &jerr);
-        /* free payload */
         free(cf->payload);
-    } else {
-        /* error */
-        fprintf(stderr, "ERROR: Failed to populate payload");
-        /* free payload */
-        free(cf->payload);
-        /* return */
-        return 3;
+
+        if (jerr != json_tokener_success) {
+            fprintf(stderr, "ERROR: Failed to parse json string");
+            json_object_put(json);
+            return NULL;
+        }
+        JSONResponse *response = new JSONResponse(statusCode, json);
+        return response;
     }
+private:
+   CURL *ch;
+};
 
-    /* check error */
-    if (jerr != json_tokener_success) {
-        /* error */
-        fprintf(stderr, "ERROR: Failed to parse json string");
-        /* free json object */
-        json_object_put(json);
-        /* return */
-        return 4;
+int main(int argc, char *argv[]) {
+    json_object *json;
+    json = json_object_new_object();
+    json_object_object_add(json, "url", json_object_new_string("http://atte.ro/"));
+    const char *url = getURL(argc, argv);
+    Client *client = new Client();
+    JSONResponse *response;
+    response = client->Post(url, json);
+    if (response != NULL) {
+        printf("Parsed JSON: %s\n", json_object_to_json_string(response->getJSON()));
     }
-
-    /* debugging */
-    printf("Parsed JSON: %s\n", json_object_to_json_string(json));
-
-    /* exit */
     return 0;
 }
