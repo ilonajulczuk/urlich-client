@@ -9,6 +9,8 @@
 /* libcurl (http://curl.haxx.se/libcurl/c) */
 #include <json-c/json.h>
 
+const char *DEFAULT_URL = "http://127.0.0.1:9081/add";
+
 // CURLRawData is a holder for curl fetch.
 class CURLRawData {
 public:
@@ -66,8 +68,8 @@ CURLcode curl_fetch_url(CURL *ch, const char *url,
 }
 
 const char* getURL(int argc, char *argv[]) {
-    const char *url = "http://127.0.0.1:9081/add";
-    return url;
+    //TODO(att): refactor into strings instead of char arrays.
+    return DEFAULT_URL;
 }
 
 class JSONResponse {
